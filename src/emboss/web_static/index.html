@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Emboss · Roof reconstruction</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/acquisition-assets/vendor/three.module.js",
+          "three/addons/": "/acquisition-assets/vendor/"
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="/emboss-imagery/style.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to buildings</a>
+    <nav aria-label="Main navigation">
+      <a class="brand" href="/">emboss<span>Roof reconstruction</span></a>
+      <div>
+        <button id="select-tab" class="active" aria-pressed="true" aria-controls="selection">Find a building</button
+        ><button id="results-tab" aria-pressed="false" aria-controls="workspace">My buildings</button
+        ><a href="/docs" target="_blank" rel="noopener">API</a>
+      </div>
+    </nav>
+    <section id="selection">
+      <iframe
+        id="picker"
+        src="/acquire"
+        title="House and area acquisition"
+      ></iframe>
+    </section>
+    <main id="workspace" tabindex="-1" hidden>
+      <aside>
+        <div class="library-heading"><h1 id="library-title" tabindex="-1">My buildings</h1><span id="building-count"></span></div>
+        <label class="sr-only" for="filter-buildings">Filter by building number</label>
+        <input id="filter-buildings" type="search" placeholder="Building number" />
+        <div class="selection-bar"><button id="select-all" class="text-button">Select all</button><span id="selection-count">None selected</span></div>
+        <div id="houses"></div>
+        <p id="no-matches" role="status" hidden>No buildings match that number.</p>
+        <p id="library-empty" hidden>No buildings yet. Use <button id="find-first" class="text-button">Find a building</button> to add one.</p>
+        <button id="run" class="primary" disabled>
+          Model selected
+        </button>
+        <details>
+          <summary>Rebuild options</summary>
+          <label
+            ><input id="force" type="checkbox" /> Recompute existing
+            results</label
+          >
+        </details>
+        <details id="removed-buildings" hidden>
+          <summary>Removed buildings</summary>
+          <p>Restore a building and its saved model.</p>
+          <div id="removed-list"></div>
+        </details>
+        <div id="progress" aria-live="polite"></div>
+      </aside>
+      <section class="result">
+        <button id="back-library" class="text-button">Back to buildings</button>
+        <div class="result-head">
+          <div>
+            <h2 id="title" tabindex="-1">Select a building</h2>
+          </div>
+          <a id="download" hidden>Download model</a>
+        </div>
+        <p id="view-status" role="status" hidden></p><button id="retry-view" hidden>Retry loading model</button>
+        <div class="result-views">
+          <div class="model-panel">
+            <div id="viewer">
+              <div id="empty">Open a saved model or choose a building to start.</div>
+            </div>
+            <div class="legend" id="model-help" hidden>
+              <span>Drag to orbit · Scroll or pinch to zoom</span><button id="reset-view">Reset view</button><span id="summary"></span>
+            </div>
+            <div id="detail-list"></div>
+          </div>
+          <section id="imagery-panel" hidden aria-label="Orthophoto and segmentation">
+            <h3>Orthophoto &amp; segmentation</h3>
+            <p id="image-source"></p>
+            <div class="image-stack">
+              <img id="orthophoto" alt="" />
+              <img id="segmentation" alt="" aria-hidden="true" />
+              <svg id="footprint" class="footprint-overlay" aria-hidden="true"></svg>
+            </div>
+            <label class="overlay-control">
+              <input id="show-segmentation" type="checkbox" checked /> Show segmentation
+            </label>
+            <label class="overlay-control">
+              <input id="show-footprint" type="checkbox" checked /> Show scaffold footprint
+            </label>
+            <div id="segmentation-legend" aria-label="Segmentation classes"></div>
+            <p class="image-links">
+              <a id="open-orthophoto" target="_blank" rel="noopener">Open orthophoto</a> ·
+              <a id="download-segmentation">Download segmentation</a>
+            </p>
+            <button id="change-image" class="change-image">Change orthophoto</button>
+          </section>
+        </div>
+      </section>
+    </main>
+    <div id="library-notice" role="status" hidden>
+      <span id="notice-text"></span>
+      <button id="undo-remove">Undo</button>
+      <button id="dismiss-notice" aria-label="Dismiss notification">Close</button>
+    </div>
+    <dialog id="image-dialog" aria-labelledby="gallery-title">
+      <header class="gallery-header">
+        <div>
+          <h2 id="gallery-title">Choose an orthophoto</h2>
+          <p>Select the image that best matches the footprint.</p>
+        </div>
+        <button id="close-gallery" aria-label="Close image chooser">Close</button>
+      </header>
+      <div id="gallery-buildings" aria-label="Buildings to review"></div>
+      <div class="gallery-toolbar">
+        <p id="gallery-status" role="status" aria-live="polite"></p>
+        <label><input id="gallery-footprint" type="checkbox" checked /> Scaffold footprint</label>
+      </div>
+      <div class="gallery-content"><div id="image-gallery"></div>
+        <button id="retry-gallery" hidden>Retry loading images</button>
+      </div>
+      <footer class="gallery-footer">
+        <p id="gallery-note">Choose an image before modeling.</p>
+        <div><button id="cancel-gallery">Back</button>
+          <button id="confirm-gallery" class="primary" disabled>Confirm &amp; model</button></div>
+      </footer>
+    </dialog>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

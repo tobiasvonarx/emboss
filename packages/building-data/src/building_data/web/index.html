@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Select a building or area</title>
+    <link rel="stylesheet" href="/acquisition-assets/vendor/leaflet.css" />
+    <link rel="stylesheet" href="/acquisition-assets/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Find a building</h1>
+        <p>Search Switzerland, then select a roof or an area.</p>
+      </header>
+      <div class="selection-tools">
+        <div class="search">
+          <label class="sr-only" for="search">Search for an address</label>
+          <input id="search" type="search" autocomplete="off" placeholder="Address or town" aria-controls="suggestions" aria-expanded="false" />
+          <div id="suggestions" aria-label="Matching addresses"></div>
+          <p id="search-status" role="status" hidden></p>
+        </div>
+        <div class="mode" role="group" aria-label="Selection type">
+          <button id="house-mode" class="selected" aria-pressed="true">Building</button>
+          <button id="area-mode" aria-pressed="false">Area</button>
+        </div>
+      </div>
+      <div id="map" aria-label="Building map. Use arrow keys to pan and Enter to select." aria-describedby="hint"></div>
+      <div class="actions">
+        <p id="hint">Click a roof, or pan the map and press Enter.</p>
+        <div class="action-buttons"><button id="clear-selection" hidden>Clear</button><button id="acquire" disabled>Prepare building</button></div>
+      </div>
+      <div class="job-status"><progress id="working" aria-label="Preparing buildings" hidden></progress><div id="status" role="status" aria-live="polite"></div></div>
+      <div id="summary"></div>
+    </main>
+    <script src="/acquisition-assets/vendor/leaflet.js"></script>
+    <script src="/acquisition-assets/picker.js"></script>
+  </body>
+</html>

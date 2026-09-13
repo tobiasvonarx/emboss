@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 300" role="img" aria-labelledby="title description">
+  <title id="title">Emboss overview figure placeholder</title>
+  <desc id="description">TODO: replace with the paper overview figure. Imagery + LiDAR to Emboss to 3D roof details.</desc>
+  <rect width="1080" height="300" rx="16" fill="#f1f5f4"/>
+  <text x="540" y="55" text-anchor="middle" font-family="sans-serif" font-size="25" fill="#173f3b">Emboss</text>
+  <rect x="45" y="100" width="300" height="90" rx="10" fill="white" stroke="#9bbab3"/>
+  <text x="195" y="153" text-anchor="middle" font-family="sans-serif" font-size="21" fill="#173f3b">Imagery + LiDAR</text>
+  <path d="M 355 145 h 23 m -7 -7 l 7 7 -7 7" fill="none" stroke="#527e74" stroke-width="2"/>
+  <rect x="390" y="100" width="300" height="90" rx="10" fill="white" stroke="#9bbab3"/>
+  <text x="540" y="153" text-anchor="middle" font-family="sans-serif" font-size="21" fill="#173f3b">Emboss</text>
+  <path d="M 700 145 h 23 m -7 -7 l 7 7 -7 7" fill="none" stroke="#527e74" stroke-width="2"/>
+  <rect x="735" y="100" width="300" height="90" rx="10" fill="white" stroke="#9bbab3"/>
+  <text x="885" y="153" text-anchor="middle" font-family="sans-serif" font-size="21" fill="#173f3b">3D roof details</text>
+  <text x="540" y="254" text-anchor="middle" font-family="sans-serif" font-size="17" fill="#56716c">TODO: replace with the paper overview figure</text>
+</svg>

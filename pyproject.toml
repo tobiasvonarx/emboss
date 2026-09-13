@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "emboss"
+version = "0.1.0"
+description = "Reconstruct roof details from aerial imagery and LiDAR"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "building-data[imagery]", "torch==2.11.0", "transformers==5.8.0",
+  "huggingface-hub==1.14.0", "scipy==1.17.1", "opencv-python-headless==4.13.0.92",
+]
+
+[project.scripts]
+emboss = "emboss.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.4", "httpx>=0.28", "ruff>=0.12"]
+
+[tool.uv.sources]
+building-data = { path = "packages/building-data", editable = true }
+mobile-sam = { git = "https://github.com/ChaoningZhang/MobileSAM.git", rev = "f706ad9c4eb7f219c00d9050e46328518ffb65d2" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages/building-data/tests"]
