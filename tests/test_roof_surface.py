@@ -148,3 +148,13 @@ def test_empty_and_invalid_input_contract():
     ).triangles.shape == (0, 3, 3)
     with pytest.raises(ValueError, match="index"):
         exposed_roof(square(), np.array([[0, 1, 9]]))
+
+
+def test_coverage_pruning_retains_boundary_lines_and_far_occluders_do_not_matter():
+    target = box(0, 0, 2, 2)
+    wall = np.array([[[2, 0, 1], [2, 2, 1], [2, 2, 2]]], dtype=float)
+    distant = np.array([[[100, 100, 1000], [101, 100, 1000], [100, 101, 1000]]], dtype=float)
+    expected = covered_footprint(target, [0, 0, 0], [0, 0, 1], wall)
+    actual = covered_footprint(target, [0, 0, 0], [0, 0, 1], np.concatenate([distant, wall]))
+    assert expected.equals_exact(actual, 0)
+    assert actual.length == 2

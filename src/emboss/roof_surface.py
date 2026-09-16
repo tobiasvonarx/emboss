@@ -259,8 +259,19 @@ def covered_footprint(
         return Polygon()
     target = translate(polygon_xy, xoff=-origin[0], yoff=-origin[1])
     local = triangles - origin
+    # Reject disjoint XY bounds before constructing projected Shapely objects.
+    # Inclusive comparisons retain walls/lines touching the target boundary.
+    lower = local[:, :, :2].min(axis=1)
+    upper = local[:, :, :2].max(axis=1)
+    x0, y0, x1, y1 = target.bounds
+    intersects = (
+        (upper[:, 0] >= x0)
+        & (lower[:, 0] <= x1)
+        & (upper[:, 1] >= y0)
+        & (lower[:, 1] <= y1)
+    )
     covered = []
-    for triangle in local:
+    for triangle in local[intersects]:
         if (
             np.linalg.norm(
                 np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])
