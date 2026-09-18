@@ -28,6 +28,7 @@ input::placeholder { color: var(--muted); opacity: 1; }
 #suggestions button { display: block; width: 100%; border: 0; border-radius: 0; text-align: left; font-weight: 400; }
 #search-status { padding-top: 8px; font-size: 13px; }
 #map { flex: 1; min-height: 260px; border: 1px solid var(--line); }
+.leaflet-control-layers-selector { width: auto; min-height: 0; padding: 0; accent-color: var(--accent); }
 #map:focus-visible::after { content: ''; position: absolute; z-index: 800; left: 50%; top: 50%; width: 16px; height: 16px; border: 2px solid white; outline: 2px solid var(--accent); border-radius: 50%; transform: translate(-50%,-50%); pointer-events: none; }
 .actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .actions p { font-size: 14px; }

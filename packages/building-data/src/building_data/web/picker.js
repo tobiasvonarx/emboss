@@ -4,6 +4,20 @@ L.tileLayer(
   "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg",
   { maxZoom: 20, attribution: "© swisstopo" },
 ).addTo(map);
+// Keep reference labels above the imagery and below selection outlines/markers.
+const labelsPane = map.createPane("labels");
+labelsPane.style.zIndex = 350;
+labelsPane.style.pointerEvents = "none";
+const placeNames = L.tileLayer(
+  "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  {
+    pane: "labels",
+    maxZoom: 20,
+    attribution:
+      'Labels: <a href="https://www.arcgis.com/home/item.html?id=a842e359856a4365b1ddf8cc34fde079">Esri</a>, HERE, Garmin, © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, and the GIS user community',
+  },
+).addTo(map);
+L.control.layers({}, { "Place names": placeNames }, { collapsed: false }).addTo(map);
 let mode = "house",
   selection = null,
   layer = null,
