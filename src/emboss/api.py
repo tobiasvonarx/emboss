@@ -10,9 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 
-import laspy
 import tifffile
 from building_data.geometry import (
     build_house_index,
@@ -20,10 +18,7 @@ from building_data.geometry import (
     load_vector_house,
     load_vector_house_scaffold,
 )
-from building_data.orthophoto_correction.geometry import crop_bounds_lv95
 from building_data.orthophoto_correction.models import CorrectionConfig
-from building_data.orthophoto_correction.pipeline import correct_house_orthophoto
-from building_data.orthophoto_correction.prepare import prepare_assets
 from building_data.orthophoto_correction.raster import write_correction_outputs
 from building_data.raster import rasterize_polygon
 from building_data.storage import checksum, contained_path, write_json
@@ -278,45 +273,9 @@ class Client:
                 house = load_vector_house_scaffold(scaffold, item.building_fid)
                 with FileLock(str(item.root / "imagery.lock")):
                     if force or _imagery_state(image_dir, imagery_fingerprint) is None:
-                        center = house.roof_envelope.centroid
-                        source = next(
-                            (
-                                s
-                                for s in item.sources
-                                if s["bounds"][0] <= center.x < s["bounds"][2]
-                                and s["bounds"][1] <= center.y < s["bounds"][3]
-                            ),
-                            item.sources[0],
-                        )
-                        with laspy.open(source["path"]) as reader:
-                            bounds = (
-                                *map(float, reader.header.mins[:2]),
-                                *map(float, reader.header.maxs[:2]),
-                            )
-                        crop_bounds = crop_bounds_lv95(
-                            house.bounds_xy,
-                            padding_m=8.0,
-                            min_side_m=config.min_crop_side_m,
-                        )
-                        assets = prepare_assets(
-                            tile_key=source["tile"],
-                            bounds_lv95=bounds,
-                            cache=config.cache_root,
-                            config=config,
-                            progress=progress,
-                            required_bounds_lv95=crop_bounds,
-                        )
-                        workspace = SimpleNamespace(
-                            tile_key=source["tile"],
-                            tile_bounds_xy=bounds,
-                            correction_raster_assets=assets,
-                        )
-                        corrected = correct_house_orthophoto(
-                            {"house": original_house},
-                            workspace,
-                            padding_m=8.0,
-                            config=config,
-                        )
+                        from .imagery import prepare_house_image
+
+                        corrected, _ = prepare_house_image(self, item, config, progress)
                         paths = write_correction_outputs(corrected, image_dir)
                         metadata = {
                             **corrected.metadata,
@@ -348,7 +307,9 @@ class Client:
                     )
                 progress("Calibrating LiDAR and fitting roof details")
                 a, b, c, d = house.bounds_xy
-                points, _sources = self.store.provider.points_for_bounds(
+                points, _sources = self.store.provider_for_house(
+                    item
+                ).points_for_bounds(
                     (a - 1, b - 1, c + 1, d + 1),
                     item.survey_year,
                     progress=progress,
@@ -410,7 +371,9 @@ class Client:
                             "diagnostics": "diagnostics/fit_diagnostics.csv",
                         },
                         "metadata": {
-                            "scaffold_provider": "swissbuildings3d",
+                            "scaffold_provider": "city3d"
+                            if item.provider == "cambridge"
+                            else "swissbuildings3d",
                             "native_result": native,
                             "mesh": mesh_stats,
                             "input_mode": "prepared_inputs",
@@ -447,7 +410,7 @@ class Client:
                             "lidar_sha256": lidar_sha256,
                             "segmentation": segmentation.diagnostics,
                             "crs": item.crs,
-                            "vertical_crs": "EPSG:5728",
+                            "vertical_crs": item.vertical_crs,
                             "bounds_xy": [x0, y0, x1, y1],
                             "strip_override": strip_id_override,
                         },

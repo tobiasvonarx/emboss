@@ -1,9 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const map = L.map("map").setView([46.95, 7.45], 12);
-L.tileLayer(
-  "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg",
-  { maxZoom: 20, attribution: "© swisstopo" },
-).addTo(map);
+let baseTiles = null, activeDataset = null, coverageLayer = null, coverageBounds = null;
+let datasetList = [], footprintSequence = 0;
+const footprints = L.geoJSON(null, {
+  style: { color: "#b37415", weight: 1.5, fillColor: "#efbc61", fillOpacity: .18 },
+}).addTo(map);
 // Keep reference labels above the imagery and below selection outlines/markers.
 const labelsPane = map.createPane("labels");
 labelsPane.style.zIndex = 350;
@@ -49,11 +50,16 @@ function setMode(value) {
 $("house-mode").onclick = () => setMode("house");
 $("area-mode").onclick = () => setMode("area");
 function choosePoint(p) {
-  if (busy) return;
+  if (busy || !activeDataset) return;
+  if (coverageBounds && !coverageBounds.contains(p)) {
+    clear();
+    $("hint").textContent = "Choose a point inside the coverage outline.";
+    return;
+  }
   if (mode === "house") {
     clear();
     layer = L.marker(p).addTo(map);
-    selection = { mode, longitude: p.lng, latitude: p.lat };
+    selection = { mode, provider: activeDataset.id, longitude: p.lng, latitude: p.lat };
     $("hint").textContent = `Selected ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
   } else if (!start) {
     clear();
@@ -72,6 +78,7 @@ function choosePoint(p) {
     }
     selection = {
       mode,
+      provider: activeDataset.id,
       bbox: [
         bounds.getWest(),
         bounds.getSouth(),
@@ -137,7 +144,7 @@ $("search").oninput = () => {
   searchTimer = setTimeout(async () => {
     try {
       const found = await api(
-        "/api/search?q=" + encodeURIComponent($("search").value),
+        "/api/search?q=" + encodeURIComponent($("search").value) + "&provider=" + encodeURIComponent(activeDataset.id),
       );
       if (seq !== searchSequence) return;
       $("search").setAttribute("aria-expanded", String(found.length > 0));
@@ -166,7 +173,8 @@ $("search").oninput = () => {
 };
 function setBusy(value) {
   busy = value;
-  for (const id of ["house-mode", "area-mode", "search", "clear-selection"]) $(id).disabled = value;
+  for (const id of ["dataset", "house-mode", "area-mode", "search", "clear-selection"]) $(id).disabled = value;
+  $("search").disabled = value || !activeDataset?.search;
   $("acquire").disabled = value || !selection;
   $("acquire").textContent = value ? "Preparing…" : mode === "house" ? "Prepare building" : "Prepare area";
   $("working").hidden = !value;
@@ -223,15 +231,70 @@ async function follow(id) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 }
-const pending = localStorage.getItem("building-data-active-job");
-if (pending) {
-  setBusy(true);
-  follow(pending)
-    .catch((error) => {
-      $("status").textContent = error.message;
-      $("status").className = "error";
-    })
-    .finally(() => {
-      setBusy(false);
-    });
+async function refreshFootprints() {
+  const seq = ++footprintSequence;
+  footprints.clearLayers();
+  if (!activeDataset?.coverage || map.getZoom() < 16) return;
+  const bounds = map.getBounds();
+  try {
+    const data = await api(`/api/datasets/${activeDataset.id}/footprints?bbox=${bounds.toBBoxString()}`);
+    if (seq === footprintSequence) footprints.addData(data);
+  } catch (error) {
+    if (seq === footprintSequence) $("status").textContent = "Building outlines could not load. Try moving the map.";
+  }
 }
+map.on("moveend", refreshFootprints);
+function selectDataset(id) {
+  const dataset = datasetList.find(item => item.id === id) || datasetList[0];
+  activeDataset = dataset;
+  map.setMinZoom(dataset.minZoom || 0);
+  footprintSequence++;
+  footprints.clearLayers();
+  searchSequence++;
+  clearTimeout(searchTimer);
+  clearSuggestions();
+  $("search").value = "";
+  $("search").disabled = !dataset.search;
+  $("search").closest(".search").hidden = !dataset.search;
+  $("search").placeholder = dataset.search ? "Address or town" : "Use the map to select Cambridge buildings";
+  $("search-status").hidden = true;
+  $("dataset").value = dataset.id;
+  $("dataset-description").textContent = dataset.description;
+  $("source-credit").textContent = dataset.footprint_attribution || "";
+  $("source-credit").hidden = !dataset.footprint_attribution;
+  if (baseTiles) map.removeLayer(baseTiles);
+  baseTiles = L.tileLayer(dataset.tiles, { minZoom: dataset.minZoom || 0, maxZoom: 20, attribution: dataset.attribution }).addTo(map);
+  if (coverageLayer) map.removeLayer(coverageLayer);
+  coverageLayer = dataset.coverage ? L.geoJSON(dataset.coverage, {
+    interactive: false, style: { color: "#215b44", weight: 2, dashArray: "6 5", fillOpacity: .025 },
+  }).addTo(map) : null;
+  coverageBounds = coverageLayer?.getBounds() || null;
+  setMode(mode);
+  $("status").textContent = "";
+  $("summary").textContent = "";
+  if (coverageBounds) map.fitBounds(coverageBounds, { padding: [20, 20] });
+  else map.setView(dataset.center, dataset.zoom);
+  localStorage.setItem("building-data-dataset", dataset.id);
+}
+$("dataset").onchange = () => selectDataset($("dataset").value);
+async function initialize() {
+  datasetList = await api("/api/datasets");
+  $("dataset").replaceChildren(...datasetList.map(dataset => {
+    const option = document.createElement("option");
+    option.value = dataset.id;
+    option.textContent = dataset.label;
+    return option;
+  }));
+  $("dataset").disabled = false;
+  selectDataset(localStorage.getItem("building-data-dataset"));
+  const pending = localStorage.getItem("building-data-active-job");
+  if (pending) {
+    setBusy(true);
+    try { await follow(pending); }
+    finally { setBusy(false); }
+  }
+}
+initialize().catch(error => {
+  $("status").textContent = error.message;
+  $("status").className = "error";
+});

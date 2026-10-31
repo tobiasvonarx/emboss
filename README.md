@@ -47,6 +47,37 @@ Imagery, LiDAR, and the pinned [segmentation model](https://huggingface.co/tvona
 
 Data and results are saved in `./data`. Edit [.env](.env.example) to change `PORT`, `DATA_DIR`, `WORKERS`, and `DEVICE`, then restart.
 
+## Cambridge pilot data
+
+The shared picker at `/acquire` offers **Switzerland** and, when installed,
+**Cambridge · 2023**. Cambridge displays the supplied Getmapping imagery,
+MasterMap building outlines, and the common source-coverage boundary. Select a
+building or draw an area using the same controls in Emboss and shading-aware-pv.
+
+Install the Cambridge sources once, outside either application's data directory:
+
+```bash
+uv run building-data import-cambridge \
+  --imagery /path/to/Getmapping-imagery.zip \
+  --topography /path/to/MasterMap-topography.zip \
+  --lidar /path/to/TL4055-2023.zip
+```
+
+The default installation is `~/.local/share/building-data/cambridge`. Set
+`CAMBRIDGE_DATA` in each app's `.env` to use another installation directory. Set
+`CITY3D_BINARY` to the compiled `CLI_Emboss` executable in each app's `.env`.
+Restart the apps after installing sources or changing these settings. Source
+imagery and MasterMap data remain local and are not bundled with the code.
+
+The importer retains source LiDAR heights and indexes classes 2–6 without
+reprojecting points. MasterMap identifiers are preserved in provider-specific
+building IDs. City3D generates and caches scaffolds; its executable and source
+revision participate in cache identity. The first adapter supports single
+footprint polygons without courtyard holes. Failed or unsupported roofs are
+reported individually rather than replaced with invented roof geometry.
+Emboss thresholds remain unchanged. Treat the results as a reviewed transfer
+pilot, especially for small details at this point density and image resolution.
+
 ## API reference
 
 ### Python

@@ -55,7 +55,7 @@ export class ImageGallery {
       button.dataset.candidate = item.id;
       button.setAttribute("aria-pressed", String(item.id === selected));
       button.disabled = true;
-      const label = item.kind === "raw" ? "Uncorrected image" : item.flight_date || String(item.year || "Aerial image");
+      const label = item.kind === "orthorectified" ? `Getmapping · ${item.year}` : item.kind === "raw" ? "Uncorrected image" : item.flight_date || String(item.year || "Aerial image");
       button.setAttribute("aria-label", `Choose ${label} (${item.id})`);
       const frame = document.createElement("div");
       frame.className = "image-stack";
@@ -82,7 +82,7 @@ export class ImageGallery {
         item.id === (info.recommended_id || info.selected_id) ? "Automatic choice" : ""
       ].filter(Boolean).join(" · ");
       const detail = document.createElement("small");
-      detail.textContent = item.kind === "raw" ? "Original aerial imagery" : `Corrected · ${item.id}`;
+      detail.textContent = item.kind === "orthorectified" ? "Supplied orthorectified imagery" : item.kind === "raw" ? "Original aerial imagery" : `Corrected · ${item.id}`;
       caption.append(name, badge, detail);
       button.append(frame, caption);
       button.onclick = () => choose(item.id);

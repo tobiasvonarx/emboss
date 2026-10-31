@@ -39,6 +39,8 @@ class HouseInput:
     sources: tuple[dict, ...]
     crs: str = "EPSG:2056"
     survey_year: int | None = None
+    provider: str = "switzerland"
+    vertical_crs: str | None = None
 
     def as_dict(self) -> dict:
         to_wgs84 = Transformer.from_crs(self.crs, 4326, always_xy=True)
@@ -51,6 +53,8 @@ class HouseInput:
             "building_fid": self.building_fid,
             "bounds_xy": list(self.bounds_xy),
             "crs": self.crs,
+            "provider": self.provider,
+            "vertical_crs": self.vertical_crs,
             "longitude": lon,
             "latitude": lat,
             "survey_year": self.survey_year,
@@ -131,6 +135,24 @@ class AcquisitionStore:
         self.workers = max(1, int(workers))
         self.root.mkdir(parents=True, exist_ok=True)
         self.provider = provider or SwissProvider(self.root / "cache", self.workers)
+        self.providers = {self.provider.name: self.provider}
+        if provider is None:
+            from .cambridge import CambridgeProvider, source_root
+            if (source_root() / "dataset.json").is_file():
+                self.providers["cambridge"] = CambridgeProvider(self.root / "cache")
+
+    def provider_for(self, name: str | None = None):
+        name = name or self.provider.name
+        if name not in self.providers:
+            raise ValueError(f"Dataset {name!r} is not installed")
+        return self.providers[name]
+
+    def provider_for_house(self, item):
+        provider = self.provider_for(item.provider)
+        saved = json.loads((item.root / "house.json").read_text())
+        if saved.get("provider_revision", provider.revision) != provider.revision:
+            raise ValueError("The building's source revision is no longer installed")
+        return provider
 
     def house(self, house_id: str) -> HouseInput:
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", house_id):
@@ -157,6 +179,8 @@ class AcquisitionStore:
             sources,
             data["crs"],
             data.get("survey_year"),
+            data.get("provider", self.provider.name),
+            data.get("vertical_crs"),
         )
 
     def ensure_house_coverage(
@@ -165,12 +189,13 @@ class AcquisitionStore:
         """Refresh legacy input extents that omitted disconnected roof sections."""
         if tuple(item.bounds_xy) == tuple(house.bounds_xy):
             return item
+        provider = self.provider_for_house(item)
         with FileLock(str(item.root / "prepare.lock")):
             manifest = item.root / "house.json"
             saved = json.loads(manifest.read_text())
             if tuple(saved["bounds_xy"]) != tuple(house.bounds_xy):
                 minx, miny, maxx, maxy = house.bounds_xy
-                _paths, sources = self.provider.lidar(
+                _paths, sources = provider.lidar(
                     (minx - 2, miny - 2, maxx + 2, maxy + 2),
                     progress=progress or (lambda _message: None),
                 )
@@ -204,13 +229,14 @@ class AcquisitionStore:
     ) -> dict:
         progress = progress or (lambda message: None)
         mode, wgs84_geometry = selection_geometry(selection)
-        self.provider.validate_selection(wgs84_geometry)
-        to_provider = Transformer.from_crs(4326, self.provider.crs, always_xy=True)
+        provider = self.provider_for(selection.get("provider"))
+        provider.validate_selection(wgs84_geometry)
+        to_provider = Transformer.from_crs(4326, provider.crs, always_xy=True)
         geometry = transform(to_provider.transform, wgs84_geometry)
         identity = {
             "selection": selection,
-            "provider": self.provider.name,
-            "revision": self.provider.revision,
+            "provider": provider.name,
+            "revision": provider.revision,
         }
         acquisition_id = hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()
@@ -219,12 +245,17 @@ class AcquisitionStore:
         root.mkdir(parents=True, exist_ok=True)
         with FileLock(str(root / "acquire.lock")):
             surfaces = root / "surfaces.gpkg"
+            failure_path = surfaces.with_suffix(".failures.json")
+            retry_failures = failure_path.exists() and bool(json.loads(failure_path.read_text()))
             # Context around the selection preserves complete buildings and touching-house topology.
-            if not surfaces.exists():
-                self.provider.buildings(geometry.buffer(50).bounds, surfaces, progress)
+            if not surfaces.exists() or retry_failures:
+                if hasattr(provider, "build_selection"):
+                    provider.build_selection(geometry, mode, surfaces, progress)
+                else:
+                    provider.buildings(geometry.buffer(50).bounds, surfaces, progress)
             index = build_house_index(surfaces)
             candidates = []
-            failures = []
+            failures = json.loads(failure_path.read_text()) if failure_path.exists() else []
             seen = set()
             for row in index.itertuples(index=False):
                 fid = int(row.building_fid)
@@ -253,12 +284,12 @@ class AcquisitionStore:
             progress(f"Found {len(candidates)} building(s)")
             # Acquire every tile in an area, even tiles without buildings.
             if mode == "area":
-                self.provider.lidar(geometry.bounds, progress=progress)
+                provider.lidar(geometry.bounds, progress=progress)
             house_ids = []
 
             def prepare(item):
                 _, fid, house = item
-                house_id = self.provider.house_id(fid)
+                house_id = provider.house_id(fid)
                 if not re.fullmatch(r"[a-zA-Z0-9_-]+", house_id):
                     raise ValueError("Provider returned an invalid house ID")
                 directory = self.root / "houses" / house_id
@@ -270,7 +301,7 @@ class AcquisitionStore:
                         if saved["bounds_xy"] == list(house.bounds_xy):
                             return house_id
                     minx, miny, maxx, maxy = house.bounds_xy
-                    _paths, sources = self.provider.lidar(
+                    _paths, sources = provider.lidar(
                         (minx - 2, miny - 2, maxx + 2, maxy + 2), progress=progress
                     )
                     relative_sources = [
@@ -293,10 +324,10 @@ class AcquisitionStore:
                             "schema": "building-input-v1",
                             "id": house_id,
                             "building_fid": fid,
-                            "provider": self.provider.name,
-                            "provider_revision": self.provider.revision,
-                            "crs": self.provider.crs,
-                            "vertical_crs": self.provider.vertical_crs,
+                            "provider": provider.name,
+                            "provider_revision": provider.revision,
+                            "crs": provider.crs,
+                            "vertical_crs": provider.vertical_crs,
                             "units": "m",
                             "surfaces_path": str(surfaces.relative_to(self.root)),
                             "bounds_xy": list(house.bounds_xy),
@@ -330,6 +361,7 @@ class AcquisitionStore:
     def export_scene(self, house_id: str, scene_dir: Path) -> Path:
         """Export a generic scene bundle without loading reconstruction or segmentation."""
         item = self.house(house_id)
+        provider = self.provider_for_house(item)
         target = Path(scene_dir)
         target.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(target) + ".lock"):
@@ -348,7 +380,7 @@ class AcquisitionStore:
                     temporary.mkdir()
                     try:
                         x0, y0, x1, y1 = item.bounds_xy
-                        terrain = self.provider.terrain(
+                        terrain = provider.terrain(
                             (x0 - 25, y0 - 25, x1 + 25, y1 + 25),
                             temporary / "dem.tif",
                             pinned_sources=item.sources,
@@ -373,7 +405,7 @@ class AcquisitionStore:
             try:
                 house = load_vector_house(item.surfaces_path, item.building_fid)
                 x0, y0, x1, y1 = item.bounds_xy
-                frame, _sources = self.provider.points_for_bounds(
+                frame, _sources = provider.points_for_bounds(
                     (x0 - 2, y0 - 2, x1 + 2, y1 + 2),
                     item.survey_year,
                     pinned_sources=item.sources,
@@ -415,7 +447,7 @@ class AcquisitionStore:
                     "focus_extent": list(item.bounds_xy),
                     "base_height": house.bounds_xyz[2],
                 }
-                terrain = self.provider.terrain(
+                terrain = provider.terrain(
                     (x0 - 25, y0 - 25, x1 + 25, y1 + 25),
                     temporary / "dem.tif",
                     pinned_sources=item.sources,

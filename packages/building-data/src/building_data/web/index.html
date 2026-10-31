@@ -11,9 +11,13 @@
     <main>
       <header>
         <h1>Find a building</h1>
-        <p>Search Switzerland, then select a roof or an area.</p>
+        <p id="dataset-description">Choose a dataset, then select a building or area.</p>
       </header>
       <div class="selection-tools">
+        <div class="dataset-field">
+          <label for="dataset">Dataset</label>
+          <select id="dataset" disabled aria-describedby="dataset-description"><option>Loading datasets…</option></select>
+        </div>
         <div class="search">
           <label class="sr-only" for="search">Search for an address</label>
           <input id="search" type="search" autocomplete="off" placeholder="Address or town" aria-controls="suggestions" aria-expanded="false" />
@@ -26,6 +30,7 @@
         </div>
       </div>
       <div id="map" aria-label="Building map. Use arrow keys to pan and Enter to select." aria-describedby="hint"></div>
+      <p id="source-credit" hidden></p>
       <div class="actions">
         <p id="hint">Click a roof, or pan the map and press Enter.</p>
         <div class="action-buttons"><button id="clear-selection" hidden>Clear</button><button id="acquire" disabled>Prepare building</button></div>

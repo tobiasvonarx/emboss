@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -18,6 +19,7 @@ from .store import AcquisitionStore, selection_geometry
 
 
 class Selection(BaseModel):
+    provider: str | None = None
     mode: str = "house"
     longitude: float | None = None
     latitude: float | None = None
@@ -41,6 +43,54 @@ def mount_acquisition(app: FastAPI, store: AcquisitionStore) -> None:
     def houses():
         return store.list_houses()
 
+    @app.get("/api/datasets")
+    def datasets():
+        from .datasets import describe
+
+        return [describe(provider) for provider in store.providers.values()]
+
+    @app.get("/api/datasets/{name}/footprints")
+    def footprints(name: str, bbox: str):
+        from pyproj import Transformer
+        from shapely.geometry import box
+        from shapely.ops import transform
+
+        try:
+            provider = store.provider_for(name)
+            values = tuple(map(float, bbox.split(",")))
+            if len(values) != 4 or not all(math.isfinite(v) for v in values):
+                raise ValueError("Expected four finite bounding-box coordinates")
+            if values[2] <= values[0] or values[3] <= values[1]:
+                raise ValueError("Invalid bounding box")
+            if not (
+                -180 <= values[0] < values[2] <= 180
+                and -90 <= values[1] < values[3] <= 90
+            ):
+                raise ValueError("Bounding box must use longitude and latitude")
+            if not hasattr(provider, "footprints"):
+                return {"type": "FeatureCollection", "features": []}
+            project = Transformer.from_crs(4326, provider.crs, always_xy=True)
+            query = transform(project.transform, box(*values)).intersection(
+                provider.coverage
+            )
+            if query.is_empty or query.area > 2_000_000:
+                return {"type": "FeatureCollection", "features": []}
+            frame = provider.footprints(query.bounds)
+            frame = frame[frame.intersects(query)]
+            return json.loads(frame[["toid", "geometry"]].to_crs(4326).to_json())
+        except (ValueError, TypeError) as error:
+            raise HTTPException(422, str(error)) from error
+
+    @app.get("/api/datasets/{name}/tiles/{z}/{x}/{y}.png")
+    def imagery_tile(name: str, z: int, x: int, y: int):
+        try:
+            provider = store.provider_for(name)
+            if not hasattr(provider, "map_tile"):
+                raise ValueError("This dataset has no local imagery tiles")
+            return Response(provider.map_tile(z, x, y), media_type="image/png")
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+
     @app.get("/api/houses/{house_id}")
     def house(house_id: str):
         try:
@@ -53,7 +103,7 @@ def mount_acquisition(app: FastAPI, store: AcquisitionStore) -> None:
         payload = selection.model_dump(exclude_none=True)
         try:
             _, geometry = selection_geometry(payload)
-            store.provider.validate_selection(geometry)
+            store.provider_for(payload.get("provider")).validate_selection(geometry)
         except (ValueError, TypeError, KeyError) as error:
             raise HTTPException(422, str(error)) from error
         return jobs.submit(
@@ -69,8 +119,15 @@ def mount_acquisition(app: FastAPI, store: AcquisitionStore) -> None:
             raise HTTPException(404, str(error)) from error
 
     @app.get("/api/search")
-    async def search(q: str):
+    async def search(q: str, provider: str | None = None):
         if not 2 <= len(q) <= 200:
+            return []
+        try:
+            selected = store.provider_for(provider)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        if selected.name != "switzerland":
+            # Local Cambridge names/TOIDs avoid a second external geocoder.
             return []
 
         def fetch():

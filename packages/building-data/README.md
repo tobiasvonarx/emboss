@@ -26,7 +26,23 @@ Mount the same API and UI in a FastAPI application with `building_data.api.mount
 
 Pass an implementation as `AcquisitionStore(..., provider=...)`. Selection coordinates are WGS84; the store transforms them into the provider's declared metric CRS. Provider geometry and vertical coordinates must be mutually compatible. Tests include a provider using a different projected CRS and identity scheme.
 
-`SwissProvider` is the only installed provider. Its source selection, 1 km tile enumeration, national vector database, and year handling live outside the generic store. The current address search and basemap are Swiss. Additional countries need source adapters and map/search configuration; their imagery must also have a correction adapter before they can run the full Emboss method. The Swiss orthophoto implementation lives separately under `orthophoto_correction/` and is installed with the `[imagery]` extra when needed.
+`SwissProvider` supplies Swiss source selection, 1 km tile enumeration, national
+vectors and year handling. `CambridgeProvider` reads a locally installed 2023
+source bundle, MasterMap footprints and orthorectified imagery, and prepares
+City3D scaffolds. See the Emboss README for `building-data import-cambridge`.
+
+`/api/datasets` describes installed providers, map imagery, search availability
+and coverage. The shared `/acquire` picker sends the provider ID with each
+selection. The store resolves a provider per acquisition and from each saved
+house manifest; switching the browser's dataset never mutates a running job's
+provider. Applications install this package rather than copying the picker.
+
+Providers may implement `build_selection(geometry, mode, output, progress)` to
+materialize only the selected scaffolds, `footprints(bounds)` for the picker
+overlay, and `orthophoto(house, config)` for supplied imagery. Swiss imagery
+continues through the separate flight-strip correction under
+`orthophoto_correction/`. Preview and reconstruction use one preparation path.
+Each app retains its own acquisition manifests, jobs, results and derived caches.
 
 ## Storage and portable scenes
 

@@ -14,7 +14,7 @@ import tifffile
 from PIL import Image
 from shapely.geometry import box
 
-from emboss import previews
+from emboss import imagery, previews
 from emboss.api import Reconstruction
 
 
@@ -120,7 +120,7 @@ def test_preview_reuses_method_and_keeps_saved_files_unchanged(saved, monkeypatc
     protected = [*result.root.rglob("*"), *result.house_input.root.rglob("*")]
     before = {path: path.read_bytes() for path in protected if path.is_file()}
     house = SimpleNamespace(roof_envelope=box(1, 1, 3, 3), bounds_xy=(1, 1, 3, 3))
-    monkeypatch.setattr(previews, "load_vector_house", lambda *_: house)
+    monkeypatch.setattr(imagery, "load_vector_house", lambda *_: house)
     calls = []
     assets = {"swissimage": ()}
 
@@ -138,8 +138,8 @@ def test_preview_reuses_method_and_keeps_saved_files_unchanged(saved, monkeypatc
         calls.append(config.strip_id_override)
         return SimpleNamespace(rgb_corrected=rgb + 20)
 
-    monkeypatch.setattr(previews, "prepare_assets", prepare)
-    monkeypatch.setattr(previews, "correct_house_orthophoto", correct)
+    monkeypatch.setattr(imagery, "prepare_assets", prepare)
+    monkeypatch.setattr(imagery, "correct_house_orthophoto", correct)
     png = previews.preview_candidate(client, "house-1", "strip-b")
     np.testing.assert_array_equal(np.asarray(Image.open(io.BytesIO(png))), rgb + 20)
     assert previews.preview_candidate(client, "house-1", "strip-b") == png
@@ -159,7 +159,7 @@ def test_preview_reuses_method_and_keeps_saved_files_unchanged(saved, monkeypatc
 def test_unknown_preview_rejected_before_preparation(saved, monkeypatch, candidate_id):
     client, _result, _rgb, _labels = saved
     monkeypatch.setattr(
-        previews, "prepare_assets", lambda **_: pytest.fail("Unexpected preparation")
+        imagery, "prepare_assets", lambda **_: pytest.fail("Unexpected preparation")
     )
     with pytest.raises(ValueError, match="not available"):
         previews.preview_candidate(client, "house-1", candidate_id)
@@ -169,7 +169,7 @@ def test_unknown_preview_rejected_before_preparation(saved, monkeypatch, candida
 def test_selected_preview_uses_saved_pixels_without_new_correction(saved, monkeypatch):
     client, result, _rgb, _labels = saved
     monkeypatch.setattr(
-        previews,
+        imagery,
         "correct_house_orthophoto",
         lambda *_args, **_kwargs: pytest.fail("Unexpected correction"),
     )
@@ -288,8 +288,8 @@ def gallery(saved, monkeypatch):
         wall_faces=(),
         floor_faces=(),
     )
-    monkeypatch.setattr(previews, "load_vector_house", lambda *_: house)
-    monkeypatch.setattr(previews, "prepare_assets", lambda **_: {"swissimage": ()})
+    monkeypatch.setattr(imagery, "load_vector_house", lambda *_: house)
+    monkeypatch.setattr(imagery, "prepare_assets", lambda **_: {"swissimage": ()})
 
     def correct(state, workspace, *, padding_m, config):
         assert client._inference_lock.locked()
@@ -303,7 +303,7 @@ def gallery(saved, monkeypatch):
         image = rgb if config.strip_id_override is None else rgb + 10
         return SimpleNamespace(rgb_corrected=image, metadata=metadata)
 
-    monkeypatch.setattr(previews, "correct_house_orthophoto", correct)
+    monkeypatch.setattr(imagery, "correct_house_orthophoto", correct)
     return client, result, rgb, labels, calls
 
 
@@ -382,7 +382,7 @@ def test_manual_saved_choice_remains_current_while_default_is_ranked_separately(
     metadata["candidate_selection"]["selected_id"] = "strip-b"
     path.write_text(json.dumps(metadata))
     # The mock correction's metadata describes automatic ranking independently.
-    correct = previews.correct_house_orthophoto
+    correct = imagery.correct_house_orthophoto
 
     def default(*args, **kwargs):
         output = correct(*args, **kwargs)
@@ -391,7 +391,7 @@ def test_manual_saved_choice_remains_current_while_default_is_ranked_separately(
         return output
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(previews, "correct_house_orthophoto", default)
+    monkeypatch.setattr(imagery, "correct_house_orthophoto", default)
     try:
         info = previews.prepare_house_imagery(client, "house-1")
         assert info["current_id"] == info["selected_id"] == "strip-b"
