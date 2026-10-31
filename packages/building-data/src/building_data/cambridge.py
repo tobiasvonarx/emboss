@@ -218,6 +218,12 @@ class CambridgeProvider:
         ).hexdigest()[:16]
         self.vertical_crs = self.metadata["vertical_crs"]
         self.coverage = shapely.geometry.shape(self.metadata["coverage"])
+        # Use the same selected datum operation as the vector/map coordinates.
+        # Native GDAL and pyproj can otherwise choose different grid resources.
+        project = Transformer.from_crs(self.crs, 3857, always_xy=True)
+        project.transform(self.coverage.centroid.x, self.coverage.centroid.y)
+        self.map_operation = project.get_last_used_operation().definition
+        self.map_revision = hashlib.sha256(self.map_operation.encode()).hexdigest()[:12]
 
     def validate_selection(self, geometry):
         project = Transformer.from_crs(4326, self.crs, always_xy=True)
@@ -242,6 +248,7 @@ class CambridgeProvider:
             self.cache
             / "map"
             / self.metadata["revision"]
+            / self.map_revision
             / str(z)
             / str(x)
             / f"{y}.png"
@@ -262,6 +269,7 @@ class CambridgeProvider:
                     str(self.root / "imagery.vrt"),
                     format="MEM",
                     dstSRS="EPSG:3857",
+                    coordinateOperation=self.map_operation,
                     outputBounds=bounds,
                     width=256,
                     height=256,
