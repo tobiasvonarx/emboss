@@ -114,6 +114,7 @@ def imagery_info(result: Reconstruction) -> dict:
         "candidates": candidates,
         "classes": classes,
         "footprint": footprint_overlay(result, metadata),
+        "target": getattr(result.house_input, "target", None),
     }
 
 

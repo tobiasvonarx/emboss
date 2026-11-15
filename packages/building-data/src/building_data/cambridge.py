@@ -214,7 +214,7 @@ class CambridgeProvider:
             else "not-configured"
         )
         self.revision = hashlib.sha256(
-            (self.metadata["revision"] + ":city3d-adapter-v1:" + binary_hash).encode()
+            (self.metadata["revision"] + ":source-targets-v2:" + binary_hash).encode()
         ).hexdigest()[:16]
         self.vertical_crs = self.metadata["vertical_crs"]
         self.coverage = shapely.geometry.shape(self.metadata["coverage"])
@@ -239,6 +239,71 @@ class CambridgeProvider:
         return pyogrio.read_dataframe(
             self.root / "footprints.gpkg", layer="buildings", bbox=bounds
         )
+
+    def selected_parts(self, source_ids):
+        if (
+            not isinstance(source_ids, list)
+            or not source_ids
+            or len(source_ids) > 256
+            or any(not isinstance(value, str) or not re.fullmatch(r"osgb\d+", value) for value in source_ids)
+        ):
+            raise ValueError("Select between 1 and 256 MasterMap source parts")
+        ids = sorted(set(source_ids))
+        frame = pyogrio.read_dataframe(
+            self.root / "footprints.gpkg",
+            layer="buildings",
+            where="toid IN (" + ",".join(f"'{value}'" for value in ids) + ")",
+        ).sort_values("toid")
+        if set(frame.toid) != set(ids):
+            raise ValueError("A selected MasterMap part is not in the installed source")
+        if any(not self.coverage.covers(geometry) for geometry in frame.geometry):
+            raise ValueError("A complete selected part extends beyond Cambridge source coverage")
+        return frame
+
+    def target_geometry(self, selection):
+        """Resolve explicit part IDs on the server, never trust a client outline."""
+        if "source_ids" not in selection:
+            return None
+        if selection.get("mode", "house") != "house":
+            raise ValueError("Explicit source parts require building-parts mode")
+        project = Transformer.from_crs(self.crs, 4326, always_xy=True)
+        return transform(project.transform, shapely.union_all(self.selected_parts(selection["source_ids"]).geometry))
+
+    @staticmethod
+    def target_id(parts):
+        ids = sorted(parts.toid)
+        if len(ids) == 1:
+            return int(parts.building_id.iloc[0])
+        # Composite targets have a deterministic identity independent of click order.
+        return int(hashlib.sha256("|".join(ids).encode()).hexdigest()[:15], 16)
+
+    def source_neighbours(self, geometry, selected_ids):
+        from .geometry import HOUSE_TOUCH_TOLERANCE_M
+
+        nearby = self.footprints(geometry.buffer(HOUSE_TOUCH_TOLERANCE_M).bounds)
+        return sorted(
+            int(row.building_id)
+            for row in nearby.itertuples()
+            if row.toid not in selected_ids
+            and row.geometry.distance(geometry) <= HOUSE_TOUCH_TOLERANCE_M
+        )
+
+    def preview_target(self, source_ids):
+        parts = self.selected_parts(source_ids)
+        geometry = shapely.union_all(parts.geometry)
+        neighbours = self.source_neighbours(geometry, set(parts.toid))
+        project = Transformer.from_crs(self.crs, 4326, always_xy=True)
+        return {
+            "scope": "selected_source_parts",
+            "source_ids": list(parts.toid),
+            "area_m2": float(geometry.area),
+            "touching_source_ids": [f"osgb{value}" for value in neighbours],
+            "geometry": mapping(transform(project.transform, geometry)),
+            "unsupported_source_ids": [
+                row.toid for row in parts.itertuples()
+                if row.geometry.geom_type != "Polygon" or row.geometry.interiors
+            ],
+        }
 
     def map_tile(self, z, x, y):
         """Render the supplied imagery on Leaflet's grid; cache only derived tiles."""
@@ -358,7 +423,10 @@ class CambridgeProvider:
         ds = None
         return output
 
-    def build_selection(self, geometry, mode, output, progress=print):
+    def build_selection(self, geometry, mode, output, progress=print, *, source_ids=None):
+        if source_ids is not None:
+            parts = self.selected_parts(source_ids)
+            return self._build_targets([parts], output, progress)
         footprints = self.footprints(
             geometry.buffer(30 if mode == "house" else 0).bounds
         )
@@ -375,27 +443,53 @@ class CambridgeProvider:
         return self._build_footprints(self.footprints(bounds), output, progress)
 
     def _build_footprints(self, footprints, output, progress):
+        return self._build_targets(
+            [footprints.loc[[index]] for index in footprints.index], output, progress
+        )
+
+    def _build_targets(self, targets, output, progress):
         from .city3d import scaffold_surfaces
 
         failures = []
         ready = []
-        for row in footprints.itertuples():
-            if not self.coverage.covers(row.geometry):
+        for parts in targets:
+            fid = self.target_id(parts)
+            selected_ids = sorted(parts.toid)
+            geometry = shapely.union_all(parts.geometry)
+            if not self.coverage.covers(geometry):
                 failures.append(
                     {
-                        "building_fid": int(row.building_id),
+                        "building_fid": fid,
                         "error": "The complete building extends beyond Cambridge source coverage",
                     }
                 )
                 continue
             try:
-                progress(f"Preparing roof scaffold for {row.toid}")
-                ready.append(
-                    (int(row.building_id), row.toid, scaffold_surfaces(self, row))
-                )
+                surfaces = {kind: [] for kind in ("Roof", "Wall", "Floor")}
+                for row in parts.itertuples():
+                    progress(f"Preparing selected source part {row.toid}")
+                    part_surfaces = scaffold_surfaces(self, row)
+                    for kind, rings in surfaces.items():
+                        rings.extend(part_surfaces[kind])
+                projected_roof = shapely.union_all([
+                    shapely.make_valid(Polygon(np.asarray(ring)[:, :2]))
+                    for ring in surfaces["Roof"]
+                ])
+                coverage = {
+                    "source_area_m2": float(geometry.area),
+                    "roof_projection_area_m2": float(projected_roof.area),
+                    "missing_area_m2": float(geometry.difference(projected_roof).area),
+                    "extra_area_m2": float(projected_roof.difference(geometry).area),
+                    "intersection_over_union": float(geometry.intersection(projected_roof).area / geometry.union(projected_roof).area),
+                }
+                ready.append((fid, selected_ids, surfaces, geometry,
+                              self.source_neighbours(geometry, set(selected_ids)), coverage))
             except (ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
                 failures.append(
-                    {"building_fid": int(row.building_id), "error": str(error)}
+                    {"building_fid": fid, "error": str(error), **(
+                        {"source_ids": selected_ids, "failed_source_id": row.toid}
+                        if len(selected_ids) > 1 else {}
+                    )}
                 )
         temporary = output.with_suffix(".tmp.gpkg")
         temporary.unlink(missing_ok=True)
@@ -403,7 +497,7 @@ class CambridgeProvider:
         for kind in ("Roof", "Wall", "Floor"):
             layer = ds.CreateLayer(kind, _srs(), ogr.wkbMultiPolygon25D)
             layer.CreateField(ogr.FieldDefn("toid", ogr.OFTString))
-            for fid, toid, surfaces in ready:
+            for fid, selected_ids, surfaces, _geometry, _neighbours, _coverage in ready:
                 if not surfaces[kind]:
                     continue
                 multi = ogr.Geometry(ogr.wkbMultiPolygon25D)
@@ -414,9 +508,21 @@ class CambridgeProvider:
                     multi.AddGeometry(polygon)
                 feature = ogr.Feature(layer.GetLayerDefn())
                 feature.SetFID(fid)
-                feature.SetField("toid", toid)
+                feature.SetField("toid", ";".join(selected_ids))
                 feature.SetGeometry(multi)
                 layer.CreateFeature(feature)
+        layer = ds.CreateLayer("Target", _srs(), ogr.wkbUnknown)
+        for field in ("scope", "source_ids", "touching_ids", "coverage"):
+            layer.CreateField(ogr.FieldDefn(field, ogr.OFTString))
+        for fid, selected_ids, _surfaces, geometry, neighbours, coverage in ready:
+            feature = ogr.Feature(layer.GetLayerDefn())
+            feature.SetFID(fid)
+            feature.SetField("scope", "selected_source_parts")
+            feature.SetField("source_ids", json.dumps(selected_ids))
+            feature.SetField("touching_ids", json.dumps(neighbours))
+            feature.SetField("coverage", json.dumps(coverage))
+            feature.SetGeometry(ogr.CreateGeometryFromJson(json.dumps(mapping(geometry))))
+            layer.CreateFeature(feature)
         ds = None
         temporary.replace(output)
         write_json(output.with_suffix(".failures.json"), failures)

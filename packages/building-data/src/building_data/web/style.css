@@ -56,6 +56,12 @@ progress { width: 100%; height: 5px; accent-color: var(--accent); }
 .dataset-field label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .dataset-field select { padding: 9px 30px 9px 12px; width: 100%; }
 #source-credit { font-size: 12px; }
+#target-preview { border-top: 1px solid var(--line); padding-top: 12px; font-size: 13px; }
+#target-preview > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#target-preview p { margin-top: 6px; }
+#selected-parts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; max-height: 100px; overflow-y: auto; }
+#selected-parts button { font-size: 12px; font-weight: 400; padding: 5px 9px; }
+#zoom-target { font-size: 12px; padding: 5px 9px; }
 .search { padding-top: 22px; }
 .mode { padding-top: 22px; }
 .mode { margin-left: auto; }

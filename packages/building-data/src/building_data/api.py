@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .jobs import JobQueue
 from .store import AcquisitionStore, selection_geometry
@@ -25,6 +25,11 @@ class Selection(BaseModel):
     latitude: float | None = None
     bbox: tuple[float, float, float, float] | None = None
     geometry: dict | None = None
+    source_ids: list[str] | None = Field(default=None, min_length=1, max_length=256)
+
+
+class SourceParts(BaseModel):
+    source_ids: list[str] = Field(min_length=1, max_length=256)
 
 
 def mount_acquisition(app: FastAPI, store: AcquisitionStore) -> None:
@@ -91,6 +96,16 @@ def mount_acquisition(app: FastAPI, store: AcquisitionStore) -> None:
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
 
+    @app.post("/api/datasets/{name}/target-preview")
+    def target_preview(name: str, parts: SourceParts):
+        try:
+            provider = store.provider_for(name)
+            if not hasattr(provider, "preview_target"):
+                raise ValueError("This dataset does not support source-part selection")
+            return provider.preview_target(parts.source_ids)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+
     @app.get("/api/houses/{house_id}")
     def house(house_id: str):
         try:
@@ -103,7 +118,12 @@ def mount_acquisition(app: FastAPI, store: AcquisitionStore) -> None:
         payload = selection.model_dump(exclude_none=True)
         try:
             _, geometry = selection_geometry(payload)
-            store.provider_for(payload.get("provider")).validate_selection(geometry)
+            provider = store.provider_for(payload.get("provider"))
+            if "source_ids" in payload:
+                if not hasattr(provider, "target_geometry"):
+                    raise ValueError("This dataset does not support source-part selection")
+                geometry = provider.target_geometry(payload)
+            provider.validate_selection(geometry)
         except (ValueError, TypeError, KeyError) as error:
             raise HTTPException(422, str(error)) from error
         return jobs.submit(

@@ -31,6 +31,11 @@
       </div>
       <div id="map" aria-label="Building map. Use arrow keys to pan and Enter to select." aria-describedby="hint"></div>
       <p id="source-credit" hidden></p>
+      <section id="target-preview" aria-label="Selected building parts" hidden>
+        <div><strong id="target-heading">Selected parts</strong><button id="zoom-target" type="button">Show target</button></div>
+        <p id="target-description" role="status" aria-live="polite"></p>
+        <ul id="selected-parts" aria-label="Selected source parts"></ul>
+      </section>
       <div class="actions">
         <p id="hint">Click a roof, or pan the map and press Enter.</p>
         <div class="action-buttons"><button id="clear-selection" hidden>Clear</button><button id="acquire" disabled>Prepare building</button></div>

@@ -2,8 +2,34 @@ const $ = (id) => document.getElementById(id);
 const map = L.map("map").setView([46.95, 7.45], 12);
 let baseTiles = null, activeDataset = null, coverageLayer = null, coverageBounds = null;
 let datasetList = [], footprintSequence = 0;
+let previewSequence = 0, targetReady = false;
+const selectedParts = new Map();
+const selectedOutline = L.geoJSON(null, {
+  interactive: false,
+  style: { color: "#154fba", weight: 3, fillColor: "#4585de", fillOpacity: .24 },
+}).addTo(map);
 const footprints = L.geoJSON(null, {
   style: { color: "#b37415", weight: 1.5, fillColor: "#efbc61", fillOpacity: .18 },
+  onEachFeature(feature, outline) {
+    outline.bindTooltip(feature.properties.toid);
+    outline.on("click", event => {
+      L.DomEvent.stopPropagation(event);
+      if (activeDataset?.source_parts && mode === "house") togglePart(feature, event.latlng);
+      else choosePoint(event.latlng);
+    });
+    outline.on("add", () => {
+      const element = outline.getElement();
+      if (!element) return;
+      element.setAttribute("tabindex", "0");
+      element.setAttribute("role", "button");
+      element.setAttribute("aria-label", `Toggle source part ${feature.properties.toid}`);
+      element.addEventListener("keydown", event => {
+        if (!["Enter", " "].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        if (activeDataset?.source_parts && mode === "house") togglePart(feature, outline.getBounds().getCenter());
+      });
+    });
+  },
 }).addTo(map);
 // Keep reference labels above the imagery and below selection outlines/markers.
 const labelsPane = map.createPane("labels");
@@ -25,6 +51,14 @@ let mode = "house",
   start = null,
   busy = false;
 function clear() {
+  $("status").textContent = "";
+  $("summary").textContent = "";
+  previewSequence++;
+  selectedParts.clear();
+  selectedOutline.clearLayers();
+  targetReady = false;
+  $("target-preview").hidden = true;
+  $("selected-parts").replaceChildren();
   if (layer) map.removeLayer(layer);
   layer = null;
   selection = null;
@@ -42,10 +76,11 @@ function setMode(value) {
   $("area-mode").setAttribute("aria-pressed", String(value === "area"));
   $("hint").textContent =
     value === "house"
-      ? "Click a roof, or pan the map and press Enter."
-      : "Choose two opposite corners. Use clicks or pan and press Enter.";
+      ? activeDataset?.source_parts ? "Zoom in and click each outlined part of your target. Click again to remove it." : "Click a roof, or pan the map and press Enter."
+      : activeDataset?.source_parts ? "Choose two corners. Source parts will be prepared separately; this does not identify whole buildings." : "Choose two opposite corners. Use clicks or pan and press Enter.";
+  $("house-mode").textContent = activeDataset?.source_parts ? "Building parts" : "Building";
   $("acquire").textContent =
-    value === "house" ? "Prepare building" : "Prepare area";
+    value === "house" ? activeDataset?.source_parts ? "Prepare selected parts" : "Prepare building" : "Prepare area";
 }
 $("house-mode").onclick = () => setMode("house");
 $("area-mode").onclick = () => setMode("area");
@@ -57,6 +92,10 @@ function choosePoint(p) {
     return;
   }
   if (mode === "house") {
+    if (activeDataset.source_parts) {
+      $("hint").textContent = "Select an outlined source part. Zoom in if outlines are not visible.";
+      return;
+    }
     clear();
     layer = L.marker(p).addTo(map);
     selection = { mode, provider: activeDataset.id, longitude: p.lng, latitude: p.lat };
@@ -93,6 +132,48 @@ function choosePoint(p) {
   $("acquire").disabled = false;
   $("clear-selection").hidden = false;
 }
+async function togglePart(feature, point) {
+  if (busy) return;
+  $("status").textContent = "";
+  $("summary").textContent = "";
+  const id = feature.properties.toid;
+  if (selectedParts.has(id)) selectedParts.delete(id);
+  else selectedParts.set(id, feature);
+  const seq = ++previewSequence;
+  targetReady = false;
+  selectedOutline.clearLayers();
+  selectedOutline.addData([...selectedParts.values()]);
+  $("target-preview").hidden = !selectedParts.size;
+  $("clear-selection").hidden = !selectedParts.size;
+  $("acquire").disabled = true;
+  $("selected-parts").replaceChildren(...[...selectedParts.values()].map(part => {
+    const item = document.createElement("li"), button = document.createElement("button");
+    button.textContent = `Remove ${part.properties.toid}`;
+    button.disabled = busy;
+    button.onclick = () => togglePart(part, point);
+    item.append(button); return item;
+  }));
+  if (!selectedParts.size) { selection = null; $("hint").textContent = "Select each outlined part of your target."; return; }
+  selection = { mode: "house", provider: activeDataset.id, longitude: point.lng, latitude: point.lat, source_ids: [...selectedParts.keys()].sort() };
+  $("target-heading").textContent = `${selectedParts.size} source ${selectedParts.size === 1 ? "part" : "parts"} selected`;
+  $("target-description").textContent = "Checking the selected footprint and neighbouring parts…";
+  try {
+    const preview = await api(`/api/datasets/${activeDataset.id}/target-preview`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_ids: selection.source_ids }),
+    });
+    if (seq !== previewSequence) return;
+    const unsupported = preview.unsupported_source_ids;
+    $("target-description").textContent = `${preview.area_m2.toFixed(1)} m² selected. ${preview.touching_source_ids.length} touching source parts are outside this target. ` +
+      (unsupported.length ? `Cannot prepare this complete selection: ${unsupported.join(", ")} has courtyard holes or unsupported geometry.` : "Only the highlighted parts will be modeled together; add any missing wings.");
+    $("hint").textContent = "Check the highlighted footprint before preparing the target.";
+    targetReady = unsupported.length === 0;
+    $("acquire").disabled = !targetReady;
+  } catch (error) {
+    if (seq !== previewSequence) return;
+    $("target-description").textContent = error.message;
+  }
+}
+$("zoom-target").onclick = () => { if (selectedParts.size) map.fitBounds(selectedOutline.getBounds(), { padding: [30, 30], maxZoom: 20 }); };
 map.on("click", event => choosePoint(event.latlng));
 $("map").addEventListener("keydown", event => {
   if (event.key === "Enter" && event.target === $("map")) {
@@ -174,9 +255,10 @@ $("search").oninput = () => {
 function setBusy(value) {
   busy = value;
   for (const id of ["dataset", "house-mode", "area-mode", "search", "clear-selection"]) $(id).disabled = value;
+  $("selected-parts").querySelectorAll("button").forEach(button => button.disabled = value);
   $("search").disabled = value || !activeDataset?.search;
-  $("acquire").disabled = value || !selection;
-  $("acquire").textContent = value ? "Preparing…" : mode === "house" ? "Prepare building" : "Prepare area";
+  $("acquire").disabled = value || !selection || (activeDataset?.source_parts && mode === "house" && !targetReady);
+  $("acquire").textContent = value ? "Preparing…" : mode === "house" ? activeDataset?.source_parts ? "Prepare selected parts" : "Prepare building" : "Prepare area";
   $("working").hidden = !value;
 }
 $("acquire").onclick = async () => {
@@ -208,7 +290,13 @@ async function follow(id) {
       const result = state.result;
       const failures = result.failures || [];
       $("summary").textContent =
-        `${result.houses.length} ${result.houses.length === 1 ? "building" : "buildings"} ready${failures.length ? `; ${failures.length} could not be prepared` : ""}.`;
+        `${result.houses.length} ${result.provider === "cambridge" ? result.houses.length === 1 ? "selected target" : "selected targets" : result.houses.length === 1 ? "building" : "buildings"} ready${failures.length ? `; ${failures.length} could not be prepared` : ""}.`;
+      if (result.targets?.length) {
+        $("summary").textContent += " " + result.targets.map(target => {
+          const c = target.coverage;
+          return `${target.source_ids.length} selected source parts; input ${c.source_area_m2.toFixed(2)} m², roof ${c.roof_projection_area_m2.toFixed(2)} m²; ${c.extra_area_m2.toFixed(2)} m² outside and ${c.missing_area_m2.toFixed(2)} m² missing from the source footprint. Review boundary differences before reconstruction.`;
+        }).join(" ");
+      }
       if (failures.length)
         $("status").textContent = failures
           .map((f) => `Building ${f.building_fid}: ${f.error}`)

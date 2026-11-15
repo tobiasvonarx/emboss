@@ -54,7 +54,8 @@ def _parse_touching_building_fids(value: Any) -> tuple[int, ...]:
         text = str(token).strip()
         if not text or text.lower() in {"nan", "none", "<na>"}:
             continue
-        parsed.append(int(float(text)))
+        # TOIDs and composite target IDs exceed the exact-integer range of float.
+        parsed.append(int(text) if text.lstrip("+-").isdigit() else int(float(text)))
     return tuple(parsed)
 
 
@@ -552,7 +553,10 @@ def build_house_index(vector_path: Path) -> pd.DataFrame:
         "min_z",
         "max_z",
     ]
-    return pd.DataFrame(rows.values(), columns=columns).sort_values(["object_type", "building_fid"]).reset_index(drop=True)
+    index = pd.DataFrame(rows.values(), columns=columns).sort_values(["object_type", "building_fid"]).reset_index(drop=True)
+    from .targets import source_topology
+
+    return source_topology(index, vector_path)
 
 
 def _union_find_parent(size: int) -> list[int]:
@@ -967,6 +971,13 @@ def load_vector_house(vector_path: Path, building_fid: int, *, index: pd.DataFra
 
     is_independent = True
     touching: tuple[int, ...] = ()
+    if index is None:
+        from .targets import read_targets
+
+        source_target = read_targets(vector_path).get(int(building_fid))
+        if source_target is not None:
+            touching = tuple(source_target["touching_building_fids"])
+            is_independent = not touching
     if index is not None and len(index):
         rows = index.loc[index["building_fid"].astype(int) == int(building_fid)]
         if not rows.empty:
@@ -1045,7 +1056,8 @@ def _feature_properties(feature: dict[str, Any] | None) -> dict[str, Any]:
 def _coerce_building_fid(value: Any) -> int:
     if value is None or str(value).strip() == "":
         return -1
-    return int(float(value))
+    text = str(value).strip()
+    return int(text) if text.lstrip("+-").isdigit() else int(float(text))
 
 
 def _feature_polygon(feature: dict[str, Any]) -> Polygon:

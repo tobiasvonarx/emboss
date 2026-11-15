@@ -41,6 +41,7 @@ class HouseInput:
     survey_year: int | None = None
     provider: str = "switzerland"
     vertical_crs: str | None = None
+    target: dict | None = None
 
     def as_dict(self) -> dict:
         to_wgs84 = Transformer.from_crs(self.crs, 4326, always_xy=True)
@@ -50,11 +51,19 @@ class HouseInput:
         )
         return {
             "id": self.id,
+            "label": (
+                f"Cambridge target · {len(self.target['source_ids'])} selected parts"
+                if self.target and len(self.target["source_ids"]) > 1
+                else f"MasterMap part osgb{self.building_fid}"
+                if self.provider == "cambridge"
+                else f"Building {self.building_fid}"
+            ),
             "building_fid": self.building_fid,
             "bounds_xy": list(self.bounds_xy),
             "crs": self.crs,
             "provider": self.provider,
             "vertical_crs": self.vertical_crs,
+            "target": self.target,
             "longitude": lon,
             "latitude": lat,
             "survey_year": self.survey_year,
@@ -181,6 +190,7 @@ class AcquisitionStore:
             data.get("survey_year"),
             data.get("provider", self.provider.name),
             data.get("vertical_crs"),
+            data.get("target"),
         )
 
     def ensure_house_coverage(
@@ -228,8 +238,16 @@ class AcquisitionStore:
         self, selection: dict, progress: Callable[[str], None] | None = None
     ) -> dict:
         progress = progress or (lambda message: None)
+        selection = dict(selection)
         mode, wgs84_geometry = selection_geometry(selection)
         provider = self.provider_for(selection.get("provider"))
+        if "source_ids" in selection:
+            if not hasattr(provider, "target_geometry"):
+                raise ValueError("This dataset does not support source-part selection")
+            wgs84_geometry = provider.target_geometry(selection)
+            selection["source_ids"] = sorted(set(selection["source_ids"]))
+            anchor = wgs84_geometry.representative_point()
+            selection.update(longitude=anchor.x, latitude=anchor.y)
         provider.validate_selection(wgs84_geometry)
         to_provider = Transformer.from_crs(4326, provider.crs, always_xy=True)
         geometry = transform(to_provider.transform, wgs84_geometry)
@@ -250,10 +268,18 @@ class AcquisitionStore:
             # Context around the selection preserves complete buildings and touching-house topology.
             if not surfaces.exists() or retry_failures:
                 if hasattr(provider, "build_selection"):
-                    provider.build_selection(geometry, mode, surfaces, progress)
+                    options = {}
+                    if "source_ids" in selection:
+                        options["source_ids"] = selection["source_ids"]
+                    provider.build_selection(geometry, mode, surfaces, progress, **options)
                 else:
+                    if "source_ids" in selection:
+                        raise ValueError("This dataset does not support source-part selection")
                     provider.buildings(geometry.buffer(50).bounds, surfaces, progress)
             index = build_house_index(surfaces)
+            from .targets import read_targets
+
+            targets = read_targets(surfaces)
             candidates = []
             failures = json.loads(failure_path.read_text()) if failure_path.exists() else []
             seen = set()
@@ -333,6 +359,7 @@ class AcquisitionStore:
                             "bounds_xy": list(house.bounds_xy),
                             "sources": relative_sources,
                             "survey_year": anchor["year"],
+                            "target": targets.get(fid),
                         },
                     )
                 return house_id
@@ -354,6 +381,8 @@ class AcquisitionStore:
                 **identity,
                 "houses": sorted(house_ids),
                 "failures": sorted(failures, key=lambda item: item["building_fid"]),
+                "targets": [targets[self.house(identifier).building_fid] for identifier in sorted(house_ids)
+                            if self.house(identifier).building_fid in targets],
             }
             write_json(root / "acquisition.json", result)
             return result

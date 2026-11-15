@@ -31,6 +31,21 @@ vectors and year handling. `CambridgeProvider` reads a locally installed 2023
 source bundle, MasterMap footprints and orthorectified imagery, and prepares
 City3D scaffolds. See the Emboss README for `building-data import-cambridge`.
 
+Cambridge point selections accept an optional `source_ids` array of MasterMap
+TOIDs. `/api/datasets/cambridge/target-preview` resolves these IDs against the
+installed source and returns the selected footprint and unselected neighbours.
+The browser uses this explicit selection instead of assuming the nearest single
+feature is a whole building. Selected parts reconstruct atomically as one target;
+area mode continues to prepare each intersecting source part separately.
+
+Providers may include a `Target` layer alongside `Roof`, `Wall`, and `Floor` in
+the surfaces GeoPackage. Its feature ID is the target ID; geometry is the original
+source footprint. `scope`, JSON `source_ids`, JSON `touching_ids`, and JSON
+`coverage` preserve target identity, topology and measured coverage independently
+of reconstruction. `build_house_index` and `load_vector_house` prefer this source
+topology; providers without the layer retain their existing behaviour. The store
+saves the target metadata in `HouseInput.target` for downstream provenance.
+
 `/api/datasets` describes installed providers, map imagery, search availability
 and coverage. The shared `/acquire` picker sends the provider ID with each
 selection. The store resolves a provider per acquisition and from each saved

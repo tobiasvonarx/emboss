@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/OrbitControls.js";
-import { ImageGallery, drawFootprint } from "/emboss-imagery/gallery.js";
+import { ImageGallery, drawFootprint, targetNote } from "/emboss-imagery/gallery.js";
 const $ = (id) => document.getElementById(id);
+const houseLabel = house => house?.label || `Building ${house?.building_fid || house?.id || ""}`;
 let houses = [],
   results = [],
   selected = new Set(),
@@ -77,11 +78,11 @@ async function load() {
       const row = document.createElement("div");
       row.className = "house";
       row.dataset.house = house.id;
-      row.dataset.number = String(house.building_fid);
+      row.dataset.number = house.target?.source_ids.join(" ") || String(house.building_fid);
       row.classList.toggle("current", house.id === activeHouse);
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.setAttribute("aria-label", `Select building ${house.building_fid}`);
+      checkbox.setAttribute("aria-label", `Select ${houseLabel(house)}`);
       checkbox.checked = selected.has(house.id);
       checkbox.onchange = () => {
         checkbox.checked ? selected.add(house.id) : selected.delete(house.id);
@@ -89,7 +90,7 @@ async function load() {
       };
       const button = document.createElement("button");
       button.className = "open-building";
-      button.textContent = `Building ${house.building_fid}`;
+      button.textContent = houseLabel(house);
       const status = document.createElement("small");
       status.textContent = done.has(house.id)
         ? `Open model · ${done.get(house.id).solid_count} roof details`
@@ -100,7 +101,7 @@ async function load() {
       const remove = document.createElement("button");
       remove.className = "remove-building";
       remove.textContent = "Remove";
-      remove.setAttribute("aria-label", `Remove building ${house.building_fid}`);
+      remove.setAttribute("aria-label", `Remove ${houseLabel(house)}`);
       remove.title = "Remove this building and its saved model. You can undo this.";
       remove.onclick = () => removeBuilding(house);
       const selectionLabel = document.createElement("label");
@@ -284,6 +285,7 @@ function updateGalleryAction() {
     "Rerunning updates the segmentation and 3D model." : review.ids.length > 1 ?
     `${count} of ${review.ids.length} reviewed. Unreviewed buildings use their existing or automatic choice.` :
     "Next: reconstruct the roof and segment its details.";
+  if (review.info?.target) $("gallery-note").textContent += " " + targetNote(review.info.target);
 }
 async function openGallery(ids, mode) {
   if (processing || libraryBusy || !ids.length) return;
@@ -299,7 +301,7 @@ async function openGallery(ids, mode) {
   $("gallery-buildings").replaceChildren(...ids.map(id => {
     const button = document.createElement("button");
     const house = houses.find(item => item.id === id);
-    button.textContent = `Building ${house?.building_fid || id}`;
+    button.textContent = house ? houseLabel(house) : id;
     button.dataset.house = id;
     button.onclick = () => reviewHouse(id);
     return button;
@@ -314,7 +316,7 @@ async function reviewHouse(id) {
   state.info = null;
   $("retry-gallery").hidden = true;
   const house = houses.find(item => item.id === id);
-  $("gallery-title").textContent = `Choose an orthophoto · Building ${house?.building_fid || id}`;
+  $("gallery-title").textContent = `Choose an orthophoto · ${house ? houseLabel(house) : id}`;
   for (const button of $("gallery-buildings").children) {
     button.classList.toggle("active", button.dataset.house === id);
     button.setAttribute("aria-pressed", String(button.dataset.house === id));
@@ -535,7 +537,7 @@ async function view(id) {
   controls.target.set(0, 0, 0);
   $("empty").hidden = true;
   $("model-help").hidden = false;
-  $("title").textContent = `Building ${summary.provenance.input.building_fid}`;
+  $("title").textContent = houseLabel(summary.provenance.input);
   $("summary").textContent =
     `${summary.solid_count} reconstructed roof details`;
   $("download").hidden = false;

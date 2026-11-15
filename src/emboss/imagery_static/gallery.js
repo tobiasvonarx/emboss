@@ -1,4 +1,12 @@
 // One image chooser for acquisition and existing reconstructions.
+export function targetNote(target) {
+  if (!target) return "";
+  const c = target.coverage;
+  return `Selected target: ${target.source_ids.join(", ")}. ` +
+    `Source footprint ${c.source_area_m2.toFixed(2)} m², scaffold ${c.roof_projection_area_m2.toFixed(2)} m²; ` +
+    `${c.extra_area_m2.toFixed(2)} m² outside and ${c.missing_area_m2.toFixed(2)} m² missing from the source. ` +
+    "Review the boundary differences. Selected parts do not establish a complete building.";
+}
 export function drawFootprint(svg, footprint) {
   svg.replaceChildren();
   if (!footprint) return;

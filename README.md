@@ -51,8 +51,11 @@ Data and results are saved in `./data`. Edit [.env](.env.example) to change `POR
 
 The shared picker at `/acquire` offers **Switzerland** and, when installed,
 **Cambridge · 2023**. Cambridge displays the supplied Getmapping imagery,
-MasterMap building outlines, and the common source-coverage boundary. Select a
-building or draw an area using the same controls in Emboss and shading-aware-pv.
+MasterMap source-part outlines, and the common source-coverage boundary. Select
+each part of your target in **Building parts**, or draw an area to prepare source
+parts separately, using the same controls in Emboss and shading-aware-pv.
+The preview shows the exact selection, its source TOIDs and area, and the number
+of touching parts outside it. A MasterMap part is not necessarily a whole building.
 
 Install the Cambridge sources once, outside either application's data directory:
 
@@ -72,9 +75,16 @@ imagery and MasterMap data remain local and are not bundled with the code.
 The importer retains source LiDAR heights and indexes classes 2–6 without
 reprojecting points. MasterMap identifiers are preserved in provider-specific
 building IDs. City3D generates and caches scaffolds; its executable and source
-revision participate in cache identity. The first adapter supports single
-footprint polygons without courtyard holes. Failed or unsupported roofs are
-reported individually rather than replaced with invented roof geometry.
+revision participate in cache identity. Selected parts form one target with a
+stable ID; every selected part must reconstruct successfully. The adapter still
+requires each source part to be a single polygon without courtyard holes.
+Unsupported parts are identified in the preview and failed targets are never
+silently reduced to a successful subset. Source footprints and neighbour topology
+travel with the reconstructed surfaces, including neighbours without usable roofs.
+Measured input/output coverage differences are displayed during imagery review
+and preserved in result provenance; City3D's existing simplification is unchanged.
+Reacquire older Cambridge selections to use the source-part tracking and topology
+fixes. Earlier cached inputs and results remain available as historical artifacts.
 Emboss thresholds remain unchanged. Treat the results as a reviewed transfer
 pilot, especially for small details at this point density and image resolution.
 
